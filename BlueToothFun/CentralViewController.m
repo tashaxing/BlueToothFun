@@ -9,6 +9,7 @@
 #import <CoreBluetooth/CoreBluetooth.h>
 #import "CentralViewController.h"
 
+// 跟外围设备协商好 服务 和 特征 的uuid接口
 #define kServiceUUID @"180D" // 服务的UUID
 #define kCharacteristicUUID @"2A37" // 特征的UUID
 
@@ -18,7 +19,9 @@
 @property (nonatomic, strong) CBCentralManager *centralManager;
 @property (nonatomic, strong) CBPeripheral *connectedDevice;
 @property (nonatomic, strong) NSMutableArray *deviceArray;
+@property (nonatomic, strong) CBCharacteristic *writeCharacteristic;
 
+@property (weak, nonatomic) IBOutlet UITextField *textView;
 
 
 @end
@@ -123,14 +126,11 @@
         return;
     }
     
-    NSLog(@"所有的servicesUUID%@", peripheral.services);
+    NSLog(@"所有的services %@", peripheral.services);
     
     // 遍历所有service
     for (CBService *service in peripheral.services)
     {
-        
-        NSLog(@"服务%@", service.UUID);
-        
         // 找到你需要的servicesuuid
 //        if ([service.UUID isEqual:[CBUUID UUIDWithString:kServiceUUID]])
         if ([service.UUID.UUIDString isEqualToString:kServiceUUID])
@@ -157,23 +157,49 @@
     // 特征
     for (CBCharacteristic *characteristic in service.characteristics)
     {
-        NSLog(@"%@", characteristic.UUID);
+        NSLog(@"特征描述：%@", characteristic.description);
         
-        // 发现特征,监听多个特征值
-        // 注意：uuid 分为可读，可写，要区别对待！！！
-        if ([characteristic.UUID isEqual:[CBUUID UUIDWithString:kCharacteristicUUID]])
+        // 根据特征不同属性去读取或者写（特征已用位运算组合）
+        if (characteristic.properties == CBCharacteristicPropertyRead)
         {
-            NSLog(@"监听：%@", characteristic); // 监听特征
-            //保存characteristic特征值对象
-            //以后发信息也是用这个uuid
-            
-            [peripheral setNotifyValue:YES forCharacteristic:characteristic];
+            // 读特征
+            [peripheral readValueForCharacteristic:characteristic];
+            NSLog(@"%@", characteristic); // 此时已经读到数据了
         }
-        
+        else if (characteristic.properties == (CBCharacteristicPropertyWrite | CBCharacteristicPropertyExtendedProperties))
+        {
+            // 写特征(有回调和无回调两种)
+            NSData *data = [@"hello world" dataUsingEncoding:NSUTF8StringEncoding];
+            self.writeCharacteristic = characteristic;
+            [peripheral writeValue:data
+                 forCharacteristic:characteristic
+                              type:CBCharacteristicWriteWithResponse];
+        }
+        else if (characteristic.properties == CBCharacteristicPropertyNotify)
+        {
+            // 可以根据uuid去监听特征，这种特征一般是间隔多长时间持续刷新并通知的，比如心跳
+            if ([characteristic.UUID isEqual:[CBUUID UUIDWithString:kCharacteristicUUID]])
+            {
+                // 监听特征
+                [peripheral setNotifyValue:YES forCharacteristic:characteristic];
+            }
+        }
     }
 }
 
-// setNotifyValue后调用
+// writeValue， 写特征的回调
+- (void)peripheral:(CBPeripheral *)peripheral didWriteValueForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error
+{
+    if (error)
+    {
+        NSLog(@"Error updating value for characteristic %@ error: %@", characteristic.UUID, [error localizedDescription]);
+        return;
+    }
+    
+    NSLog(@"write success");
+}
+
+// setNotifyValue之后,更新特征的value的时候会调用 （凡是从蓝牙传过来的数据都要经过这个回调，简单的说这个方法就是你拿数据的唯一方法） 你可以判断是否
 - (void)peripheral:(CBPeripheral *)peripheral didUpdateValueForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error
 {
     if (error)
@@ -183,7 +209,6 @@
     }
     
     NSLog(@"特征描述：%@", characteristic.description);
-    NSLog(@"收到的数据：%@",characteristic.value);
     
 }
 
@@ -199,7 +224,10 @@
 // 写入
 - (IBAction)writeBtn:(id)sender
 {
-    
+    NSData *data = [_textView.text dataUsingEncoding:NSUTF8StringEncoding];
+    [self.connectedDevice writeValue:data
+                   forCharacteristic:self.writeCharacteristic
+                                type:CBCharacteristicWriteWithResponse];
 }
 
 #pragma mark - 列表代理
